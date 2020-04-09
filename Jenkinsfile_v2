@@ -29,8 +29,8 @@ agent any
 stages {
 	stage('Source Checkout and switch to tag if exist') {
 		steps {
-		    git credentialsId: '$git_cred_id', url: '$git_url'
-            sh 'git checkout $branch_name'
+			git credentialsId: '$git_cred_id', url: '$git_url'
+			sh 'git checkout $branch_name'
 		}
 	}
 	stage('Build With maven') {
