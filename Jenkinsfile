@@ -1,9 +1,3 @@
-node{
-	stage ("Get tools version") {
-		Maven_Version = sh (script: 'ls /var/jenkins_home/tools/hudson.tasks.Maven_MavenInstallation/', returnStdout: true).trim()
-		JAVA_Version = sh (script: 'ls /var/jenkins_home/tools/hudson.model.JDK/', returnStdout: true).trim()
-	}
-}
 pipeline {
 agent any
 	environment {
