@@ -4,31 +4,31 @@ node{
 		JAVA_Version = sh (script: 'ls /var/jenkins_home/tools/hudson.model.JDK/', returnStdout: true).trim()
 	}
 }
-
 pipeline {
 agent any
-	parameters {
-		choice(name: 'MavenVersion', choices: "${Maven_Version}", description: 'On this step you need select Maven Version')
-		choice(name: 'JavaVersion', choices: "${JAVA_Version}", description: 'On this step you need select JAVA Version')
-		choice(name: 'TomcatVersion', choices: "tomcat-8\ntomcat-7", description: 'Please select ENV server for deploy you APP')
-		choice(name: 'Deploing', choices: "NO\nYES", description: 'Option for allow/decline deploy to ENV')
-		choice(name: 'ENVIRONMENT', choices: "TEST\nSTAGE\nPROD", description: 'Please select ENV server for deploy you APP')
-		text(name: 'branch_name', defaultValue: 'master', description: 'Please fill branch/tag (default value is master)')
-	}
 	environment {
-		STAGE = 'stage.projects.local'
-		TEST = 'test.projects.local'
-		PROD = 'prod.projects.local'
-		git_url = 'https://git.projects.local/test_git.git'
-		git_cred_id = '3dd2323-avf43s-40cb-4sdfght-s44s0993s09'
-		docker_registry = 'projectname.projects.local:5000'
+		STAGE = 'stageserver.projects.local'
+		TEST = 'testserver.projects.local'
+		PROD = 'prodstageserver.projects.local'
+		docker_registry = 'myproject.domain.local:5000'
+		git_url = 'https://git.domain.local/test_git.git'
+		git_cred_id = 'b01ac2e6-ba0d-40cb-834b-9b0a883f9600' 
 		APP_EXTPORT = '30100'
 		service_network = "docker_app_net"
 		Maven_OPTS = '-Dmaven.test.failure.ignore'
-		artifactory_user = 'publisheruser'
-		artifactory_password = 'strongpassword'
-		artifactory_url = 'http://projectname.projects.local/artifactory'
-		artifactory_target_folder = 'tomcat'
+		artifactory_user = 'aaaaeeeeeeeeeee'
+		artifactory_password = 'assssssssssss'
+		artifactory_url = 'http://myproject.domain.local/artifactory'
+		artifactory_target_folder = 'test-repo'
+	}
+	parameters {
+//	    booleanParam(defaultValue: true, description: '', name: 'LatestTag')
+//	    booleanParam(defaultValue: false, description: '', name: 'LatestCommitToBranch')
+		choice(name: 'MavenVersion', choices: "Maven 3.3.3", description: 'On this step you need select Maven Version')
+		choice(name: 'JavaVersion', choices: "8", description: 'On this step you need select JAVA Version')
+		choice(name: 'TomcatVersion', choices: "tomcat-8", description: 'Please select ENV server for deploy you APP')
+		choice(name: 'Deploing', choices: "NO", description: 'Option for allow/decline deploy to ENV')
+		choice(name: 'ENVIRONMENT', choices: "TEST", description: 'Please select ENV server for deploy you APP')
 	}
 	tools {
 		maven "${params.MavenVersion}"
@@ -37,14 +37,17 @@ agent any
 stages {
 	stage('Source Checkout and switch to tag if exist') {
 		steps {
-		    git credentialsId: '${git_cred_id}', url: '${git_url}'
-            sh 'git checkout ${branch_name}'
-		}
+            git credentialsId: "${git_cred_id}", url: "${git_url}"
+            sh 'git checkout $(git describe --tags `git rev-list --tags --max-count=1`)'
+            script {
+                env.branch_name = sh( script: 'git describe --tags `git rev-list --tags --max-count=1`', returnStdout: true).trim()
+            }
+        }
 	}
 	stage('Build With maven') {
 		steps {
 			script {
-			    sh "mvn $Maven_OPTS clean install -U"
+                sh "mvn $Maven_OPTS clean install -U"
 				sh 'cp target/*.jar app.jar'
 			}
 		}
@@ -56,8 +59,8 @@ stages {
 				echo "version: '3'
 services:
   app:
-    container_name: ${JOB_NAME}_app
-    image: ${docker_registry}/${JOB_NAME}:v${BUILD_NUMBER}
+    container_name: ${JOB_NAME}_${env.branch_name}
+    image: ${docker_registry}/${JOB_NAME}:${env.branch_name}
     restart: always
     ports:
       - "${APP_EXTPORT}:8080"
@@ -74,18 +77,22 @@ services:
 				sh """
 				echo "
 FROM centos:7
-RUN yum install -y java-1.${JavaVersion}.0-openjdk java-1.${JavaVersion}.0-openjdk-devel wget
+RUN yum install -y wget
 WORKDIR /opt/
-RUN wget ${artifactory_url}/tomcat/apache-${TomcatVersion}.tar.gz
+RUN wget http://myproject.domain.local/soft/jdk1.${JavaVersion}.tar
+RUN tar -xf /opt/jdk1.${JavaVersion}.tar -C /opt/
+ENV JAVA_HOME /opt/jdk1.${JavaVersion}/
+RUN export JAVA_HOME
+RUN rm -rf /opt/jdk1.${JavaVersion}.tar
+RUN wget http://myproject.domain.local/soft/apache-${TomcatVersion}.tar.gz
 RUN tar -xf /opt/apache-${TomcatVersion}.tar.gz -C /opt/
 RUN rm -rf /opt/apache-${TomcatVersion}.tar.gz
 RUN rm -rf /opt/apache-tomcat/webapps/*
-ENV JAVA_HOME /usr/lib/jvm/java-1.${JavaVersion}.0-openjdk/
-RUN export JAVA_HOME
+
 COPY app.jar /opt/apache-tomcat/webapps/
-RUN mkdir -p /usr/share/fonts/ && cd /usr/share/fonts/
-RUN wget -r -nH --cut-dirs=2 --no-parent http://projectname.projects.local/artifactory/fonts/
-RUN fc-cache -fv /usr/share/fonts/
+RUN mkdir -p /usr/share/fonts/patagonia_care/ && cd /usr/share/fonts/patagonia_care/
+RUN wget -r -nH --cut-dirs=2 --no-parent http://myproject.domain.local/fonts/
+RUN fc-cache -fv /usr/share/fonts/patagonia_care/
 EXPOSE 8080
 CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 				"""
@@ -111,19 +118,19 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 						}
 					]
 					}''',
-					buildName: "${JOB_NAME}",
-					buildNumber: "${BUILD_NUMBER}")
+					buildName: "$JOB_NAME",
+					buildNumber: "$BUILD_NUMBER")
 			}
 		}	
 	}
 	stage('Building image') {
 		steps{
 			script {
-				sh "docker build . --network ${service_network} -t ${docker_registry}/${JOB_NAME}:v${BUILD_NUMBER}"
-				sh "docker login https://${docker_registry}"
-				sh "docker push ${docker_registry}/${JOB_NAME}:v${BUILD_NUMBER}"
-				sh "docker tag ${docker_registry}/${JOB_NAME}:v${BUILD_NUMBER} ${docker_registry}/${JOB_NAME}:latest"
-				sh "docker push ${docker_registry}/${JOB_NAME}:latest"
+				sh "docker build . --network ${service_network} -t $docker_registry/$JOB_NAME:${env.branch_name}"
+				sh "docker login https://$docker_registry"
+				sh "docker push $docker_registry/$JOB_NAME:${env.branch_name}"
+				sh "docker tag $docker_registry/$JOB_NAME:${env.branch_name} $docker_registry/$JOB_NAME:latest"
+				sh "docker push $docker_registry/$JOB_NAME:latest"
 			}
 		}
 	}
@@ -138,15 +145,15 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 	}
 	stage('Remove Unused docker image') {
 		steps{
-			sh "docker rmi -f ${docker_registry}/${JOB_NAME}:latest"
-			sh "docker rmi -f ${docker_registry}/${JOB_NAME}:v${BUILD_NUMBER}"
+			sh "docker rmi -f $docker_registry/$JOB_NAME:latest"
+			sh "docker rmi -f $docker_registry/$JOB_NAME:${env.branch_name}"
 		}
 	}
 }
 	post {
 		always {
 			echo 'One way or another, I have finished'
-			deleteDir() /* clean up our workspace */
+			deleteDir()
 		}
 	}
 }
