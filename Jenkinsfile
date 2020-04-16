@@ -1,17 +1,17 @@
 pipeline {
 agent any
 	environment {
-		STAGE = 'someproject.proj.local'
-		STAGEDB = 'db-stage.proj.local'
-		STAGE_home_domain = 'https://stage-URL'
+		STAGE_SRV = 'someproject.proj.local'
+		STAGE_DB = 'db-stage.proj.local'
+		STAGE_HDOMAIN = 'https://stage-URL'
 		
-		TEST = 'someproject.proj.local'
-		TESTDB = 'db-test.proj.local'
-		TEST_home_domain = 'https://test-URL'
+		TEST_SRV = 'someproject.proj.local'
+		TEST_DB = 'db-test.proj.local'
+		TEST_HDOMAIN = 'https://test-URL'
 		
-		PROD = 'someproject.proj.local'
-		PRODDB = 'db-prod.proj.local'
-		PROD_home_domain = 'https://PROD-URL'
+		PROD_SRV = 'someproject.proj.local'
+		PROD_DB = 'db-prod.proj.local'
+		PROD_HDOMAIN = 'https://PROD-URL'
 		
 		docker_registry = 'someproject.proj.local:5000'
 		
@@ -24,7 +24,7 @@ agent any
 		Maven_OPTS = 'clean install -P production'
 		MAVEN_SETTINGS_XML_ID = 'e7c71e35-454f-4bb8-a942-ae83bd5a1caf'
 		
-        artifactory_ID= 'artifactory'
+		artifactory_ID= 'artifactory'
 		artifactory_target_folder = 'test-repo/'
 	}
 	parameters {
@@ -41,29 +41,29 @@ agent any
 stages {
 	stage('Source Checkout and switch to tag if exist') {
 		steps {
-            git credentialsId: "${git_cred_id}", url: "${git_url}"
-            sh 'git checkout $(git describe --tags `git rev-list --tags --max-count=1`)'
-            script {
-                env.branch_name = sh( script: 'git describe --tags `git rev-list --tags --max-count=1`', returnStdout: true).trim()
-            }
-        }
+			git credentialsId: "${git_cred_id}", url: "${git_url}"
+			sh 'git checkout $(git describe --tags `git rev-list --tags --max-count=1`)'
+			script {
+				env.branch_name = sh( script: 'git describe --tags `git rev-list --tags --max-count=1`', returnStdout: true).trim()
+			}
+		}
 	}
 	stage('Build With maven') {
 		steps {
-             configFileProvider([configFile(fileId: "${MAVEN_SETTINGS_XML_ID}", variable: 'MAVEN_SETTINGS_XML')]) {
-                sh 'mvn -s $MAVEN_SETTINGS_XML $Maven_OPTS'
-                }
-                sh 'cp target/*.war ./'
+			configFileProvider([configFile(fileId: "${MAVEN_SETTINGS_XML_ID}", variable: 'MAVEN_SETTINGS_XML')]) {
+				sh 'mvn -s $MAVEN_SETTINGS_XML $Maven_OPTS'
+			}
+			sh 'cp target/*.war ./'
 		}
 	}
 	stage('Creating dockerfile & docker-compose files') {
 		steps {
 			script {
 				sh """
-				echo "db.host=${env."${params.ENVIRONMENT}DB"}
+				echo "db.host=${env."${params.ENVIRONMENT}_DB"}
 server.base=/apps/D2CommServer
 smtp.host=localhost
-home.domain=${env."${params.ENVIRONMENT}_home_domain"}
+home.domain=${env."${params.ENVIRONMENT}_HDOMAIN"}
 ">someproject.properties
 				"""
 				
@@ -110,7 +110,7 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 			}
 		}
 	}
-	stage('push to Artifactory') {
+	stage('Push to Artifactory') {
 		steps {
 			script{
 				rtUpload (
@@ -144,8 +144,8 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 				expression { params.Deploing == 'YES' }
 		}
 		steps {
-			sh "scp -o StrictHostKeyChecking=no ./docker-compose.yaml root@${env."${params.ENVIRONMENT}"}:/root/"
-			sh "ssh -o StrictHostKeyChecking=no root@${env."${params.ENVIRONMENT}"} 'docker-compose up --build -d'"
+			sh "scp -o StrictHostKeyChecking=no ./docker-compose.yaml root@${env."${params.ENVIRONMENT}_SRV"}:/root/"
+			sh "ssh -o StrictHostKeyChecking=no root@${env."${params.ENVIRONMENT}_SRV"} 'docker-compose up --build -d'"
 		}
 	}
 	stage('Remove Unused docker image') {
@@ -155,10 +155,10 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 		}
 	}
 }
-//	post {
-//		always {
-//			echo 'One way or another, I have finished'
-//			deleteDir()
-//		}
-//	}
+	post {
+		always {
+			echo 'One way or another, I have finished'
+			deleteDir()
+		}
+	}
 }
