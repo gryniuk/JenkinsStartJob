@@ -1,24 +1,24 @@
 pipeline {
 agent any
 	environment {
-		STAGE_SRV = 'someproject.proj.local'
-		STAGE_DB = 'db-stage.proj.local'
-		STAGE_HDOMAIN = 'https://stage-URL'
+		STAGE_SRV = 'STAGE.projects.local'
+		STAGE_DB = '10.10.10.133:50000'
+		STAGE_HDOMAIN = 'http://STAGE.projects.local'
 		
-		TEST_SRV = 'someproject.proj.local'
-		TEST_DB = 'db-test.proj.local'
-		TEST_HDOMAIN = 'https://test-URL'
+		TEST_SRV = 'TEST.projects.local'
+		TEST_DB = '10.10.10.132:50000'
+		TEST_HDOMAIN = 'http://TEST.projects.local'
 		
-		PROD_SRV = 'someproject.proj.local'
-		PROD_DB = 'db-prod.proj.local'
-		PROD_HDOMAIN = 'https://PROD-URL'
+		PROD_SRV = 'PROD.projects.local'
+		PROD_DB = '10.10.10.134:50000'
+		PROD_HDOMAIN = 'http://PROD.projects.local'
 		
-		docker_registry = 'someproject.proj.local:5000'
+		docker_registry = 'docker.projects.local:5000'
 		
-		git_url = 'https://git.proj.local/someproject.git'
-		git_cred_id = 'b01ac2e6-ba0d-40cb-834b-9b0a883f9600' 
-		
-		APP_EXTPORT = '30100'
+		git_url = 'https://git.projects.local/project/number1.git'
+		git_cred_id = 'aaaaaaa-bbbbb-22222-1111-sssssss' 
+		App_Net = '172.10.10'
+		App_IP = '5'
 		service_network = "docker_app_net"
 		
 		Maven_OPTS = 'clean install -P production'
@@ -41,44 +41,54 @@ agent any
 stages {
 	stage('Source Checkout and switch to tag if exist') {
 		steps {
-			git credentialsId: "${git_cred_id}", url: "${git_url}"
-			sh 'git checkout $(git describe --tags `git rev-list --tags --max-count=1`)'
-			script {
-				env.branch_name = sh( script: 'git describe --tags `git rev-list --tags --max-count=1`', returnStdout: true).trim()
-			}
-		}
+            git credentialsId: "${git_cred_id}", url: "${git_url}"
+            sh 'git checkout $(git describe --tags `git rev-list --tags --max-count=1`)'
+            script {
+                env.branch_name = sh( script: 'git describe --tags `git rev-list --tags --max-count=1`', returnStdout: true).trim()
+            }
+        }
 	}
 	stage('Build With maven') {
 		steps {
 			configFileProvider([configFile(fileId: "${MAVEN_SETTINGS_XML_ID}", variable: 'MAVEN_SETTINGS_XML')]) {
-				sh 'mvn -s $MAVEN_SETTINGS_XML $Maven_OPTS'
+			sh 'mvn -s $MAVEN_SETTINGS_XML $Maven_OPTS'
 			}
-			sh 'cp target/*.war ./'
 		}
 	}
 	stage('Creating dockerfile & docker-compose files') {
 		steps {
 			script {
+//              env.WARFILE = sh( script: 'ls|grep .war', returnStdout: true).trim()
 				sh """
 				echo "db.host=${env."${params.ENVIRONMENT}_DB"}
-server.base=/apps/D2CommServer
+server.base=/some/specific/path
 smtp.host=localhost
 home.domain=${env."${params.ENVIRONMENT}_HDOMAIN"}
-">someproject.properties
+">project.properties
 				"""
 				
 				sh """
 				echo "version: '3'
 services:
   app:
-    container_name: ${JOB_NAME}_latest
+    container_name: ${params.ENVIRONMENT}_${JOB_NAME}_latest
     image: ${docker_registry}/${JOB_NAME}:${env.branch_name}
     restart: always
-    ports:
-      - "${APP_EXTPORT}:8080"
+    expose:
+      - "8080"
     volumes:
       - /tmp/Data/${JOB_NAME}/logs:/opt/apache-tomcat/logs
-      - /tmp/Data/${JOB_NAME}/webapps:/opt/apache-tomcat/webapps
+    networks:
+      flex_net:
+        ipv4_address: $App_Net.$App_IP
+networks:
+    flex_net:
+           driver: bridge
+           ipam:
+             driver: default
+             config:
+             -
+              subnet: $App_Net.0/24
 ">docker-compose.yaml
 				"""
 				
@@ -88,21 +98,22 @@ FROM centos:7
 USER root
 RUN yum install -y wget fontconfig
 
-RUN wget http://someproject.proj.local/soft/jdk1.${JavaVersion}.tar -P /opt/
-RUN wget http://someproject.proj.local/soft/apache-${TomcatVersion}.tar.gz -P /opt/
+RUN wget http://d2comm.projects.local/soft/jdk1.${JavaVersion}.tar -P /opt/
+RUN wget http://d2comm.projects.local/soft/apache-${TomcatVersion}.tar.gz -P /opt/
 RUN tar -xf /opt/jdk1.${JavaVersion}.tar -C /opt/
 RUN tar -xf /opt/apache-${TomcatVersion}.tar.gz -C /opt/
 RUN rm -rf /opt/jdk1.${JavaVersion}.tar
 RUN rm -rf /opt/apache-${TomcatVersion}.tar.gz
 
-RUN wget -r -nH --cut-dirs=2 --no-parent http://someproject.proj.local/fonts/ -P /usr/share/fonts/
+RUN wget -r -nH --cut-dirs=2 --no-parent http://d2comm.projects.local/fonts/ -P /usr/share/fonts/
 RUN fc-cache -fv /usr/share/fonts/
 ENV JAVA_HOME /opt/jdk1.${JavaVersion}
 ENV CATALINA_HOME /opt/apache-tomcat
 ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/jdk1.${JavaVersion}/bin:/opt/apache-tomcat/bin:/opt/apache-tomcat/scripts
 RUN chmod +x /opt/apache-tomcat/bin/*
-ADD *.war /opt/apache-tomcat/webapps/
-ADD someproject.properties /opt/apache-tomcat/conf/
+COPY ./target/*.war /opt/apache-tomcat/webapps/
+COPY flex.properties /opt/apache-tomcat/conf/
+RUN yum clean packages && yum clean headers && yum clean metadata && yum clean all && rm -rf /var/cache/yum
 WORKDIR /opt/apache-tomcat/
 EXPOSE 8080
 CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
@@ -110,7 +121,7 @@ CMD /opt/apache-tomcat/bin/catalina.sh run">Dockerfile
 			}
 		}
 	}
-	stage('Push to Artifactory') {
+	stage('push to Artifactory') {
 		steps {
 			script{
 				rtUpload (
